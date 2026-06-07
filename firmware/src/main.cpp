@@ -151,6 +151,8 @@ unsigned long lastClockSyncMs = 0;
 
 void drawStatus();
 int32_t batteryLevel = -1;
+int32_t batteryVoltageMv = -1;
+bool batteryLevelEstimated = false;
 bool batteryCharging = false;
 unsigned long lastBatteryReadMs = 0;
 bool otaReady = false;
@@ -623,13 +625,63 @@ String formatClockTime() {
   return String(buffer);
 }
 
+int32_t interpolateBatteryPercent(int32_t mv, int32_t lowMv, int32_t highMv, int32_t lowPercent, int32_t highPercent) {
+  if (mv <= lowMv) {
+    return lowPercent;
+  }
+  if (mv >= highMv) {
+    return highPercent;
+  }
+  return lowPercent + ((mv - lowMv) * (highPercent - lowPercent)) / (highMv - lowMv);
+}
+
+int32_t estimateBatteryLevelFromVoltage(int32_t mv) {
+  if (mv <= 0) {
+    return -1;
+  }
+  if (mv <= 3200) {
+    return 1;
+  }
+  if (mv < 3300) {
+    return interpolateBatteryPercent(mv, 3200, 3300, 1, 5);
+  }
+  if (mv < 3600) {
+    return interpolateBatteryPercent(mv, 3300, 3600, 5, 18);
+  }
+  if (mv < 3700) {
+    return interpolateBatteryPercent(mv, 3600, 3700, 18, 32);
+  }
+  if (mv < 3800) {
+    return interpolateBatteryPercent(mv, 3700, 3800, 32, 52);
+  }
+  if (mv < 3900) {
+    return interpolateBatteryPercent(mv, 3800, 3900, 52, 72);
+  }
+  if (mv < 4050) {
+    return interpolateBatteryPercent(mv, 3900, 4050, 72, 90);
+  }
+  if (mv < 4200) {
+    return interpolateBatteryPercent(mv, 4050, 4200, 90, 100);
+  }
+  return 100;
+}
+
 void refreshBatteryStatus(bool force = false) {
   unsigned long now = millis();
   if (!force && lastBatteryReadMs > 0 && now - lastBatteryReadMs < BATTERY_REFRESH_MS) {
     return;
   }
+  int32_t voltageMv = M5.Power.getBatteryVoltage();
+  batteryVoltageMv = voltageMv > 0 ? voltageMv : -1;
+  batteryLevelEstimated = false;
+
   int32_t level = M5.Power.getBatteryLevel();
-  if (level < 0) {
+  if (level <= 0 && batteryVoltageMv > 0) {
+    batteryLevel = estimateBatteryLevelFromVoltage(batteryVoltageMv);
+    batteryLevelEstimated = true;
+  } else if (level < 0) {
+    batteryLevel = -1;
+  } else if (level == 0) {
     batteryLevel = -1;
   } else {
     if (level > 100) {
@@ -701,7 +753,7 @@ class TomatoAnimator {
     int shiftY = protectionShiftY();
     drawDashboardTopLabel(wifiConnected, shiftX, shiftY);
     drawDashboardClock(timeText, synced, shiftX, shiftY);
-    drawDashboardBattery(batteryPercent, charging, shiftX, shiftY);
+    drawDashboardBattery(batteryPercent, batteryVoltageMv, batteryLevelEstimated, charging, shiftX, shiftY);
     drawDashboardNetwork(networkText, shiftX, shiftY);
     canvas.pushSprite(0, 0);
   }
@@ -1008,7 +1060,15 @@ class TomatoAnimator {
     canvas.drawString(synced ? "24H" : "SYNC", centerX, centerY + 34 + shiftY);
   }
 
-  void drawDashboardBattery(int32_t percent, bool charging, int shiftX, int shiftY) {
+  String batteryVoltageText(int32_t voltageMv) {
+    if (voltageMv <= 0) {
+      return "";
+    }
+    int decivolts = (voltageMv + 50) / 100;
+    return String(decivolts / 10) + "." + String(decivolts % 10) + "V";
+  }
+
+  void drawDashboardBattery(int32_t percent, int32_t voltageMv, bool estimated, bool charging, int shiftX, int shiftY) {
     uint16_t bg = dashboardBg();
     int w = canvas.width() > 130 ? 76 : 66;
     int h = 22;
@@ -1030,6 +1090,13 @@ class TomatoAnimator {
     }
 
     String label = percent >= 0 ? String(percent) + "%" : "--%";
+    String voltage = batteryVoltageText(voltageMv);
+    if (estimated && percent >= 0) {
+      label = "~" + label;
+      if (voltage.length() > 0) {
+        label += " " + voltage;
+      }
+    }
     if (charging) {
       label += " CHG";
     }
