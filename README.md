@@ -1,5 +1,7 @@
 # M5StickS3 TickTick / Typeless Control Deck
 
+[中文说明](README.zh-CN.md)
+
 Personal V1 firmware and Mac bridge for turning an M5Stack StickS3 /
 M5StickS3 into a small Wi-Fi control deck for TickTick Focus, Typeless voice
 input, device status, and TickTick countdown.
