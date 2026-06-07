@@ -9,6 +9,12 @@
 #include "config.h"
 
 static const uint8_t DISPLAY_BRIGHTNESS_SLEEP_LEVEL = 0;
+static const uint8_t DISPLAY_BRIGHTNESS_LOW_BATTERY = 72;
+static const int32_t LOW_BATTERY_DIM_PERCENT = 20;
+static const int32_t LOW_BATTERY_SAVER_PERCENT = 10;
+static const int32_t LOW_BATTERY_ALERT_PERCENT = 5;
+static const unsigned long LOW_BATTERY_ALERT_INTERVAL_MS = 300000;
+static const unsigned long LOW_BATTERY_ANIMATION_FPS = 6;
 
 enum class TimerMode {
   Stopwatch
@@ -195,6 +201,11 @@ const SoundStep BOOT_MELODY[] = {
     {1568, 55, 0},
 };
 
+const SoundStep LOW_BATTERY_MELODY[] = {
+    {494, 70, 35},
+    {392, 120, 0},
+};
+
 bool harvestSoundPlaying = false;
 uint8_t harvestSoundIndex = 0;
 unsigned long nextHarvestSoundMs = 0;
@@ -202,6 +213,7 @@ const SoundStep* activeMelody = nullptr;
 size_t activeMelodyLength = 0;
 uint8_t activeMelodyIndex = 0;
 unsigned long nextSoundStepMs = 0;
+unsigned long lastLowBatteryAlertMs = 0;
 
 String endpointUrl(const char* path) {
   String base = String(BRIDGE_BASE_URL);
@@ -220,6 +232,29 @@ void beep(int frequency, int durationMs) {
 
 bool isActiveFocusState(BridgeState state) {
   return state == BridgeState::Running || state == BridgeState::Paused || state == BridgeState::Ending;
+}
+
+bool batteryAtOrBelow(int32_t threshold) {
+  return !batteryCharging && batteryLevel >= 0 && batteryLevel <= threshold;
+}
+
+bool lowBatteryDimActive() {
+  return batteryAtOrBelow(LOW_BATTERY_DIM_PERCENT);
+}
+
+bool lowBatterySaverActive() {
+  return batteryAtOrBelow(LOW_BATTERY_SAVER_PERCENT);
+}
+
+bool lowBatteryAlertActive() {
+  return batteryAtOrBelow(LOW_BATTERY_ALERT_PERCENT);
+}
+
+String powerAwareMessage(const String& message) {
+  if (lowBatterySaverActive()) {
+    return "LOW BAT";
+  }
+  return message;
 }
 
 bool shouldDimDisplay() {
@@ -253,6 +288,9 @@ void updateDisplayBrightness() {
 
   bool shouldDim = shouldDimDisplay();
   uint8_t brightness = shouldDim ? DISPLAY_BRIGHTNESS_DIM : DISPLAY_BRIGHTNESS_ACTIVE;
+  if (!shouldDim && lowBatteryDimActive() && brightness > DISPLAY_BRIGHTNESS_LOW_BATTERY) {
+    brightness = DISPLAY_BRIGHTNESS_LOW_BATTERY;
+  }
   if (shouldDim == displayDimmed && currentDisplayBrightness == brightness) {
     return;
   }
@@ -268,10 +306,11 @@ void markInteraction() {
     return;
   }
   lastInteractionMs = millis();
-  if (screenMode != ScreenMode::Dashboard && (displayDimmed || currentDisplayBrightness != DISPLAY_BRIGHTNESS_ACTIVE)) {
+  uint8_t activeBrightness = lowBatteryDimActive() ? DISPLAY_BRIGHTNESS_LOW_BATTERY : DISPLAY_BRIGHTNESS_ACTIVE;
+  if (screenMode != ScreenMode::Dashboard && (displayDimmed || currentDisplayBrightness != activeBrightness)) {
     displayDimmed = false;
-    currentDisplayBrightness = DISPLAY_BRIGHTNESS_ACTIVE;
-    M5.Display.setBrightness(DISPLAY_BRIGHTNESS_ACTIVE);
+    currentDisplayBrightness = activeBrightness;
+    M5.Display.setBrightness(activeBrightness);
   }
 }
 
@@ -361,6 +400,22 @@ void updateHarvestSound() {
   const SoundStep& step = HARVEST_MELODY[harvestSoundIndex++];
   M5.Speaker.tone(step.frequency, step.durationMs, 0, true);
   nextHarvestSoundMs = now + step.durationMs + step.gapMs;
+}
+
+void updateLowBatteryAlert() {
+  if (!lowBatteryAlertActive()) {
+    lastLowBatteryAlertMs = 0;
+    return;
+  }
+  unsigned long now = millis();
+  if (lastLowBatteryAlertMs > 0 && now - lastLowBatteryAlertMs < LOW_BATTERY_ALERT_INTERVAL_MS) {
+    return;
+  }
+  lastLowBatteryAlertMs = now;
+  if (activeMelody != nullptr || harvestSoundPlaying) {
+    return;
+  }
+  triggerMelody(LOW_BATTERY_MELODY, sizeof(LOW_BATTERY_MELODY) / sizeof(LOW_BATTERY_MELODY[0]));
 }
 
 String extractJsonString(const String& body, const char* key) {
@@ -1453,15 +1508,15 @@ void drawStatus() {
         currentCountdownRemainingSeconds(),
         countdownDurationSeconds,
         stableHourglassPose,
-        countdownMessage,
+        powerAwareMessage(countdownMessage),
         countdownError);
     return;
   }
   if (screenMode == ScreenMode::Voice) {
-    tomatoAnimator.drawVoice(voiceListening, lastMessage, lastError);
+    tomatoAnimator.drawVoice(voiceListening, powerAwareMessage(lastMessage), lastError);
     return;
   }
-  tomatoAnimator.draw(displayState(), currentDisplayElapsedSeconds(), lastMessage, lastError);
+  tomatoAnimator.draw(displayState(), currentDisplayElapsedSeconds(), powerAwareMessage(lastMessage), lastError);
 }
 
 void updateAnimationFrame() {
@@ -1469,6 +1524,12 @@ void updateAnimationFrame() {
   unsigned long frameMs = screenMode == ScreenMode::Dashboard ? DASHBOARD_REFRESH_MS : 1000 / fps;
   if (screenMode == ScreenMode::Hourglass && countdownState != CountdownState::Running) {
     frameMs = DASHBOARD_REFRESH_MS;
+  }
+  if (lowBatterySaverActive() && screenMode != ScreenMode::Dashboard) {
+    unsigned long lowBatteryFrameMs = 1000 / (LOW_BATTERY_ANIMATION_FPS == 0 ? 1 : LOW_BATTERY_ANIMATION_FPS);
+    if (frameMs < lowBatteryFrameMs) {
+      frameMs = lowBatteryFrameMs;
+    }
   }
   unsigned long now = millis();
   if (now - lastFrameMs < frameMs) {
@@ -2064,6 +2125,7 @@ void loop() {
   flushPendingKey2Click();
   updateHourglassPose();
   updateCountdownCompletion();
+  refreshBatteryStatus();
 
   if (WiFi.status() != WL_CONNECTED) {
     ensureWifi();
@@ -2073,6 +2135,7 @@ void loop() {
   }
 
   updateDisplayBrightness();
+  updateLowBatteryAlert();
   updateMelody();
   updateHarvestSound();
   updateAnimationFrame();
