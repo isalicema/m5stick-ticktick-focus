@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.machiwhale.m5stick-focus-bridge</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/python3</string>
+    <string>mac-bridge/focus_bridge.py</string>
+    <string>--config</string>
+    <string>mac-bridge/config.local.json</string>
+    <string>--live</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/yangwutu/Documents/codex work/m5stick-ticktick-focus</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/m5stick-focus-bridge.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/m5stick-focus-bridge.err</string>
+</dict>
+</plist>

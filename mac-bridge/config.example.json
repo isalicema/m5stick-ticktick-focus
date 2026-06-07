@@ -1,0 +1,34 @@
+{
+  "host": "0.0.0.0",
+  "port": 8787,
+  "dry_run": true,
+  "allow_local_fallback": true,
+  "state_path": "~/Library/Application Support/M5StickTickTickFocus/state.json",
+  "security": {
+    "token": ""
+  },
+  "ticktick": {
+    "start_shortcut_name": "TickTick Start Stopwatch",
+    "start_command": "",
+    "pause_command": "",
+    "resume_command": "",
+    "end_command": "",
+    "record_command": "",
+    "command_timeout_seconds": 20
+  },
+  "pomo": {
+    "duration_seconds": 1500,
+    "start_shortcut_name": "TickTick Start Countdown",
+    "start_command": "",
+    "pause_command": "",
+    "resume_command": "",
+    "end_command": "",
+    "command_timeout_seconds": 20
+  },
+  "voice": {
+    "input_command": "\"/absolute/path/to/m5stick-ticktick-focus/mac-bridge/TypelessKeySender.app/Contents/MacOS/TypelessKeySender\" ctrl-cmd-shift-space",
+    "start_command": "\"/absolute/path/to/m5stick-ticktick-focus/mac-bridge/TypelessKeySender.app/Contents/MacOS/TypelessKeySender\" ctrl-cmd-shift-space",
+    "stop_command": "\"/absolute/path/to/m5stick-ticktick-focus/mac-bridge/TypelessKeySender.app/Contents/MacOS/TypelessKeySender\" ctrl-cmd-shift-space",
+    "command_timeout_seconds": 5
+  }
+}
