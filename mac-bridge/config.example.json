@@ -10,9 +10,9 @@
   "ticktick": {
     "start_shortcut_name": "TickTick Start Stopwatch",
     "start_command": "",
-    "pause_command": "",
-    "resume_command": "",
-    "end_command": "",
+    "pause_command": "python3 mac-bridge/ticktick_focus_ui.py pause",
+    "resume_command": "python3 mac-bridge/ticktick_focus_ui.py resume",
+    "end_command": "python3 mac-bridge/ticktick_focus_ui.py end",
     "record_command": "",
     "command_timeout_seconds": 20
   },
@@ -20,9 +20,9 @@
     "duration_seconds": 1500,
     "start_shortcut_name": "TickTick Start Countdown",
     "start_command": "",
-    "pause_command": "",
-    "resume_command": "",
-    "end_command": "",
+    "pause_command": "python3 mac-bridge/ticktick_focus_ui.py pause",
+    "resume_command": "python3 mac-bridge/ticktick_focus_ui.py resume",
+    "end_command": "python3 mac-bridge/ticktick_focus_ui.py end",
     "command_timeout_seconds": 20
   },
   "voice": {

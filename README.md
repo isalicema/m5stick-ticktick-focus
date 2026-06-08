@@ -121,8 +121,9 @@ the stopwatch tomato screen.
 V1 behavior:
 
 - Starting the countdown is synced to TickTick through Shortcuts.
-- Pause / resume / end are managed by the local bridge first, avoiding fragile
-  TickTick desktop UI automation for those actions.
+- Pause / resume / end use `ticktick_focus_ui.py` to drive TickTick through
+  macOS UI automation. If UI automation fails, the bridge still keeps local
+  countdown state as a fallback.
 
 IMU posture mapping:
 
@@ -258,7 +259,7 @@ Current V1 has been validated with:
 - Typeless long-press start and release stop
 - dashboard time / battery / OTA display
 - hourglass X-axis flip start, Z-axis flat pause, auto-rotate UI, and TickTick
-  countdown start
+  countdown start / pause / end
 - KEY2 double-click display-off and first-key wake behavior
 
 Run bridge tests:

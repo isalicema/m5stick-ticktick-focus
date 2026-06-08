@@ -30,22 +30,27 @@ The bridge calls it with:
 shortcuts run "TickTick Start Countdown"
 ```
 
-For pause/resume/end, TickTick's public automation surface is less clear. Keep
-those as configurable commands until a reliable UI automation or TickTick CLI/MCP
-focus-control command is confirmed on the target machine.
+For pause/resume/end, TickTick's public automation surface is less clear. This
+project uses the bundled `ticktick_focus_ui.py` helper to drive TickTick through
+macOS UI automation.
 
-Example command hook shape:
+Recommended command hook shape:
 
 ```json
 {
   "ticktick": {
-    "pause_command": "shortcuts run 'TickTick Pause Focus'",
-    "resume_command": "shortcuts run 'TickTick Resume Focus'",
-    "end_command": "shortcuts run 'TickTick End Focus'",
+    "pause_command": "python3 mac-bridge/ticktick_focus_ui.py pause",
+    "resume_command": "python3 mac-bridge/ticktick_focus_ui.py resume",
+    "end_command": "python3 mac-bridge/ticktick_focus_ui.py end",
     "record_command": "shortcuts run 'TickTick Add Focus Record'"
+  },
+  "pomo": {
+    "pause_command": "python3 mac-bridge/ticktick_focus_ui.py pause",
+    "resume_command": "python3 mac-bridge/ticktick_focus_ui.py resume",
+    "end_command": "python3 mac-bridge/ticktick_focus_ui.py end"
   }
 }
 ```
 
-The exact shortcut internals are intentionally outside this repository because
-they depend on what TickTick exposes on the installed macOS version.
+The helper depends on TickTick's current macOS UI structure, so it may need
+small calibration if TickTick changes the Focus window.

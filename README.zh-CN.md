@@ -105,7 +105,7 @@ Ctrl + Cmd + Shift + Space
 V1 行为：
 
 - 开始倒计时会通过 Shortcuts 同步到 TickTick。
-- 暂停、继续和结束先由本地 bridge 管理，避免 TickTick 桌面 UI 自动化不稳定带来的误报。
+- 暂停、继续和结束会通过 `ticktick_focus_ui.py` 走 TickTick 桌面 UI 自动化；如果自动化失败，bridge 仍会保留本地倒计时状态作为兜底。
 
 IMU 姿态映射：
 
@@ -236,7 +236,7 @@ PlatformIO 环境使用 `M5Unified`、`M5PM1`、`ArduinoOTA`、`HTTPClient` 和 
 - TickTick 正计时：开始 / 暂停 / 继续 / 结束可用
 - Typeless：长按开始、松手结束可用
 - 仪表屏：时间、电量、OTA 地址显示可用
-- 沙漏倒计时：X 轴翻转启动、Z 轴平放暂停、UI 自动旋转、TickTick 倒计时启动可用
+- 沙漏倒计时：X 轴翻转启动、Z 轴平放暂停、UI 自动旋转、TickTick 倒计时开始 / 暂停 / 结束可用
 - `KEY2` 双击息屏和任意键唤醒吞键行为可用
 
 运行 bridge 测试：
