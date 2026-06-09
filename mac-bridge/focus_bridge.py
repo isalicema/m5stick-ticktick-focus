@@ -382,7 +382,7 @@ class FocusController:
                 f"voice {action} command has an unknown template key: {exc}"
             ) from exc
         if self.config.get("dry_run"):
-            return self.snapshot(f"dry-run voice {action} command: {command}")
+            return self.voice_snapshot(f"dry-run voice {action} command: {command}")
         completed = subprocess.run(
             command,
             shell=True,
@@ -398,7 +398,13 @@ class FocusController:
             )
         detail = (completed.stdout or completed.stderr or "").strip()
         default_message = "voice input started" if action == "start" else "voice input stopped"
-        return self.snapshot(detail or default_message)
+        return self.voice_snapshot(detail or default_message)
+
+    def voice_snapshot(self, message: str) -> dict[str, Any]:
+        payload = self.snapshot(message)
+        payload["last_action"] = message
+        payload["last_error"] = ""
+        return payload
 
     def voice_input_start(self) -> dict[str, Any]:
         return self._run_voice_command("start")

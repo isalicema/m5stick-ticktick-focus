@@ -131,11 +131,16 @@ class FocusControllerTests(unittest.TestCase):
             },
         )
 
+        controller.click()
+        controller.store["current"]["last_error"] = "old focus error"
+        adapter.actions.clear()
         started = controller.voice_input_start()
         stopped = controller.voice_input_stop()
 
         self.assertIn("dry-run voice start command: \"/absolute/path/TypelessKeySender\"", started["message"])
         self.assertIn("dry-run voice stop command: \"/absolute/path/TypelessKeySender\"", stopped["message"])
+        self.assertEqual(started["last_error"], "")
+        self.assertEqual(stopped["last_error"], "")
         self.assertEqual(adapter.actions, [])
 
     def test_pomo_start_pause_resume_and_end(self):

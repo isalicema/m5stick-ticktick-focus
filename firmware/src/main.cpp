@@ -2131,7 +2131,11 @@ void loop() {
     ensureWifi();
   } else if (millis() - lastStatePollMs >= STATE_POLL_MS) {
     lastStatePollMs = millis();
-    callBridge("GET", screenMode == ScreenMode::Hourglass ? "/pomo/state" : "/focus/state");
+    if (screenMode == ScreenMode::Hourglass) {
+      callBridge("GET", "/pomo/state");
+    } else if (screenMode == ScreenMode::Focus || screenMode == ScreenMode::Dashboard) {
+      callBridge("GET", "/focus/state");
+    }
   }
 
   updateDisplayBrightness();
