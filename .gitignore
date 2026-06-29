@@ -10,3 +10,4 @@ firmware/include/config.h
 config.local.json
 state.json
 mac-bridge/send_typeless_key
+mac-bridge/TypelessKeySender.app/Contents/MacOS/TypelessKeySender

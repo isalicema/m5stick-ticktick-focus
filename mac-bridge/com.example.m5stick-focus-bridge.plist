@@ -3,11 +3,12 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.machiwhale.m5stick-focus-bridge</string>
+  <string>com.example.m5stick-focus-bridge</string>
 
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/local/bin/python3</string>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
     <string>mac-bridge/focus_bridge.py</string>
     <string>--config</string>
     <string>mac-bridge/config.local.json</string>
@@ -15,7 +16,7 @@
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/yangwutu/Documents/codex work/m5stick-ticktick-focus</string>
+  <string>/ABSOLUTE/PATH/TO/m5stick-ticktick-focus</string>
 
   <key>EnvironmentVariables</key>
   <dict>

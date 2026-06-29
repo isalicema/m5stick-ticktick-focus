@@ -4,6 +4,8 @@
 
 这是一个个人 V1 项目：把 M5Stack StickS3 / M5StickS3 做成一个通过 Wi-Fi 控制 Mac 的小型物理控制器，用来控制 TickTick 正计时 Focus、Typeless 语音输入、设备状态仪表盘，以及 TickTick 倒计时番茄钟。
 
+这是一个非官方个人项目，与 TickTick、Typeless 或 M5Stack 官方没有从属关系。
+
 项目由两部分组成：
 
 - `firmware/`：StickS3 固件。负责读取 KEY1/KEY2、绘制屏幕 UI、处理 IMU 姿态、播放提示音，并通过 Wi-Fi 调用 Mac bridge。
@@ -78,6 +80,15 @@ Mac bridge 通过 `TypelessKeySender.app` 这个小型原生 helper 发送 Typel
 Ctrl + Cmd + Shift + Space
 ```
 
+Live 使用语音输入前，需要先本地编译 helper：
+
+```bash
+mkdir -p mac-bridge/TypelessKeySender.app/Contents/MacOS
+cc mac-bridge/send_typeless_key.c \
+  -framework ApplicationServices \
+  -o mac-bridge/TypelessKeySender.app/Contents/MacOS/TypelessKeySender
+```
+
 早期的 `KEY2` 长按录音备注方案已经废弃。
 
 ## 仪表屏
@@ -149,8 +160,16 @@ python3 mac-bridge/focus_bridge.py --config mac-bridge/config.local.json --live
 
 Mac bridge 设计为可通过 macOS LaunchAgent 后台运行：
 
-```text
-com.machiwhale.m5stick-focus-bridge
+```bash
+cp mac-bridge/com.example.m5stick-focus-bridge.plist \
+  ~/Library/LaunchAgents/com.example.m5stick-focus-bridge.plist
+```
+
+把复制后的 plist 里的 `WorkingDirectory` 改成当前仓库的绝对路径，然后加载：
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.m5stick-focus-bridge.plist
+launchctl kickstart -k gui/$(id -u)/com.example.m5stick-focus-bridge
 ```
 
 ## Shortcuts 设置
@@ -256,3 +275,8 @@ python3 -m unittest mac-bridge/test_focus_bridge.py
 - `mac-bridge/config.example.json`：bridge 配置模板。
 - `mac-bridge/SHORTCUTS.md`：TickTick macOS Shortcuts 备注。
 - `mac-bridge/send_typeless_key.c`：Typeless 原生按键 helper 源码。
+- `mac-bridge/com.example.m5stick-focus-bridge.plist`：LaunchAgent 模板。
+
+## License
+
+MIT

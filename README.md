@@ -6,6 +6,9 @@ Personal V1 firmware and Mac bridge for turning an M5Stack StickS3 /
 M5StickS3 into a small Wi-Fi control deck for TickTick Focus, Typeless voice
 input, device status, and TickTick countdown.
 
+This is an unofficial personal project and is not affiliated with TickTick,
+Typeless, or M5Stack.
+
 The project has two parts:
 
 - `firmware/`: PlatformIO firmware for StickS3. It reads KEY1/KEY2, updates
@@ -91,6 +94,15 @@ configured Typeless shortcut. In the current setup both start and stop use:
 Ctrl + Cmd + Shift + Space
 ```
 
+Build the helper locally before live voice-input use:
+
+```bash
+mkdir -p mac-bridge/TypelessKeySender.app/Contents/MacOS
+cc mac-bridge/send_typeless_key.c \
+  -framework ApplicationServices \
+  -o mac-bridge/TypelessKeySender.app/Contents/MacOS/TypelessKeySender
+```
+
 The older KEY2 long-press recording-note idea was intentionally abandoned.
 
 ## Dashboard
@@ -169,8 +181,17 @@ python3 mac-bridge/focus_bridge.py --config mac-bridge/config.local.json --live
 
 The local bridge is designed to run as a macOS LaunchAgent:
 
-```text
-com.machiwhale.m5stick-focus-bridge
+```bash
+cp mac-bridge/com.example.m5stick-focus-bridge.plist \
+  ~/Library/LaunchAgents/com.example.m5stick-focus-bridge.plist
+```
+
+Edit `WorkingDirectory` in the copied plist to this repository's absolute path,
+then load it with:
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.m5stick-focus-bridge.plist
+launchctl kickstart -k gui/$(id -u)/com.example.m5stick-focus-bridge
 ```
 
 ## Shortcuts Setup
@@ -281,3 +302,8 @@ python3 -m unittest mac-bridge/test_focus_bridge.py
 - `mac-bridge/config.example.json`: bridge configuration template.
 - `mac-bridge/SHORTCUTS.md`: notes for TickTick macOS Shortcuts.
 - `mac-bridge/send_typeless_key.c`: source for the native Typeless key helper.
+- `mac-bridge/com.example.m5stick-focus-bridge.plist`: LaunchAgent template.
+
+## License
+
+MIT
