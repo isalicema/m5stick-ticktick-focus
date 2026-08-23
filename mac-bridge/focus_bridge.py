@@ -583,6 +583,13 @@ class FocusController:
             session["mode"] = "local_fallback"
             session["last_error"] = str(exc)
             session["last_action"] = "local timer started"
+        # The Shortcut/UI command is synchronous and can take several seconds.
+        # TickTick only starts during that command, so anchoring the local timer
+        # before it runs permanently adds command latency to every session.
+        started_at = utc_now()
+        session["started_at"] = started_at
+        session["created_at"] = started_at
+        session["updated_at"] = started_at
         self._save_store()
         return self.snapshot("started")
 
@@ -601,13 +608,7 @@ class FocusController:
         return self.snapshot("paused")
 
     def _resume(self, session: dict[str, Any]) -> dict[str, Any]:
-        now = utc_now()
         paused_started_at = session.get("paused_started_at")
-        if paused_started_at:
-            paused_total = float(session.get("paused_total_seconds") or 0.0)
-            session["paused_total_seconds"] = paused_total + max(
-                0.0, now - float(paused_started_at)
-            )
         try:
             result = self.adapter.resume(session)
             session["last_action"] = result.message
@@ -615,9 +616,18 @@ class FocusController:
         except BridgeError as exc:
             session["last_error"] = str(exc)
             session["last_action"] = "local timer resumed"
+        # Keep the whole UI-command interval paused. Otherwise the local clock
+        # resumes before TickTick has actually completed the transition and the
+        # command latency remains as a permanent positive offset.
+        resumed_at = utc_now()
+        if paused_started_at:
+            paused_total = float(session.get("paused_total_seconds") or 0.0)
+            session["paused_total_seconds"] = paused_total + max(
+                0.0, resumed_at - float(paused_started_at)
+            )
         session["state"] = STATE_RUNNING
         session["paused_started_at"] = None
-        session["updated_at"] = now
+        session["updated_at"] = resumed_at
         self._save_store()
         return self.snapshot("resumed")
 

@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 import sys
 
@@ -14,6 +15,7 @@ from focus_bridge import (
     FocusController,
     deep_merge,
 )
+import focus_bridge
 
 
 class FakeAdapter:
@@ -78,6 +80,37 @@ class FocusControllerTests(unittest.TestCase):
         self.assertEqual(ended["state"], "idle")
         self.assertEqual(adapter.actions, ["start", "pause", "resume", "end", "record"])
         self.assertEqual(ended["history_count"], 1)
+
+    def test_command_latency_is_not_counted_as_focus_time(self):
+        clock = [100.0]
+
+        class DelayedAdapter(FakeAdapter):
+            def start(self, session):
+                clock[0] += 3.0
+                return super().start(session)
+
+            def resume(self, session):
+                clock[0] += 3.0
+                return super().resume(session)
+
+        adapter = DelayedAdapter()
+        controller = self.make_controller(adapter)
+
+        with mock.patch.object(focus_bridge, "utc_now", side_effect=lambda: clock[0]):
+            started = controller.click()
+            self.assertEqual(controller.store["current"]["started_at"], 103.0)
+            self.assertEqual(started["elapsed_seconds"], 0)
+
+            clock[0] += 10.0
+            paused = controller.click()
+            self.assertEqual(paused["elapsed_seconds"], 10)
+
+            clock[0] += 20.0
+            resumed = controller.click()
+            self.assertEqual(resumed["elapsed_seconds"], 10)
+            self.assertEqual(
+                controller.store["current"]["paused_total_seconds"], 23.0
+            )
 
     def test_local_fallback_keeps_timer_usable(self):
         adapter = FakeAdapter(fail_actions={"start", "pause", "resume", "end", "record"})

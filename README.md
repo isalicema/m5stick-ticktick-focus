@@ -76,6 +76,10 @@ Animation rules:
 
 TickTick start uses the macOS Shortcut `TickTick Start Stopwatch`. Pause,
 resume, and end currently use configurable macOS UI automation hooks.
+Because those synchronous commands can take a few seconds, the bridge anchors
+start and resume only after the command returns. Clients may respond to the
+button immediately and then reconcile to the authoritative TickTick elapsed
+time without permanently counting UI-command latency.
 
 ## Typeless Voice Input
 
