@@ -261,6 +261,80 @@ end clickSecondaryWhenVisible
     run_osascript(script, mode)
 
 
+def click_focus_action_fast(mode: str) -> None:
+    """Click a direct Focus button without walking the full AX tree.
+
+    TickTick's calendar pane can add hundreds of accessibility nodes. Repeatedly
+    scanning ``entire contents`` then makes a simple action exceed the
+    AppleScript timeout. The Focus controls are direct children of the window,
+    so inspect only that small button list and select the upper/lower action by
+    geometry. This also avoids a blind coordinate click and localized labels.
+    """
+    script = r'''
+on run argv
+  set modeName to item 1 of argv
+  tell application "TickTick" to activate
+  delay 0.12
+  tell application "System Events"
+    tell process "TickTick"
+      set frontmost to true
+      set actionClicked to false
+      repeat 15 times
+        set winPos to position of window 1
+        set winSize to size of window 1
+        set wx to item 1 of winPos
+        set wy to item 2 of winPos
+        set ww to item 1 of winSize
+        set wh to item 2 of winSize
+        set primaryButton to missing value
+        set primaryY to 99999
+        set secondaryButton to missing value
+        set secondaryY to -1
+        set candidateCount to 0
+        repeat with candidateButton in buttons of window 1
+          try
+            set p to position of candidateButton
+            set s to size of candidateButton
+            set bx to item 1 of p
+            set buttonY to item 2 of p
+            set bw to item 1 of s
+            set bh to item 2 of s
+            if bw >= 90 and bw <= 220 and bh >= 35 and bh <= 80 then
+              if buttonY >= (wy + wh * 0.5) and buttonY <= (wy + wh * 0.95) then
+                if bx >= (wx + ww * 0.18) and bx <= (wx + ww * 0.58) then
+                  set candidateCount to candidateCount + 1
+                  if buttonY < primaryY then
+                    set primaryY to buttonY
+                    set primaryButton to candidateButton
+                  end if
+                  if buttonY > secondaryY then
+                    set secondaryY to buttonY
+                    set secondaryButton to candidateButton
+                  end if
+                end if
+              end if
+            end if
+          end try
+        end repeat
+        if modeName is "secondary" and candidateCount >= 2 then
+          click secondaryButton
+          set actionClicked to true
+          exit repeat
+        else if modeName is not "secondary" and candidateCount >= 1 then
+          click primaryButton
+          set actionClicked to true
+          exit repeat
+        end if
+        delay 0.1
+      end repeat
+      if not actionClicked then error "Unable to find direct TickTick Focus action button."
+    end tell
+  end tell
+end run
+'''
+    run_osascript(script, mode)
+
+
 def click_primary_action_button() -> None:
     click_focus_action("primary")
 
@@ -288,6 +362,34 @@ end run
     return run_osascript(script, *CONFIRM_BUTTONS)
 
 
+def click_compact_confirmation_button() -> str:
+    """Confirm TickTick's long-focus duration sheet when it is present.
+
+    Sessions longer than one hour open a small window containing hour/minute
+    fields and one confirmation button. Its button currently has no accessible
+    name, so localized title matching cannot find it. Restrict the fallback to
+    a compact auxiliary window to avoid ever clicking an arbitrary control in
+    the main TickTick window.
+    """
+    script = r'''
+tell application "System Events"
+  tell process "TickTick"
+    if (count of windows) < 1 then return ""
+    set frontWindow to front window
+    set windowSize to size of frontWindow
+    if (item 1 of windowSize) > 600 or (item 2 of windowSize) > 500 then return ""
+    if (count of text fields of frontWindow) < 2 then return ""
+    try
+      click button 1 of frontWindow
+      return "compact confirmation"
+    end try
+  end tell
+end tell
+return ""
+'''
+    return run_osascript(script)
+
+
 def wait_for_state(expected: set[str | None], timeout: float = 2.5) -> str | None:
     deadline = time.time() + timeout
     last_state = stopwatch_state()
@@ -311,15 +413,36 @@ def wait_for_secondary_button(timeout: float = 2.0) -> bool:
     return False
 
 
+def click_action_and_wait(
+    mode: str,
+    expected: set[str | None],
+    *,
+    accessibility_fallback: bool = True,
+    verify_timeout: float = 3.0,
+) -> str | None:
+    click_focus_action_fast(mode)
+    state = wait_for_state(expected, timeout=verify_timeout)
+    if state in expected or not accessibility_fallback:
+        return state
+
+    # Window layouts outside TickTick's standard split view retain the older
+    # accessibility-based locator. Only fall back after the fast click has had
+    # enough time to produce an authoritative preference-state transition.
+    click_focus_action(mode)
+    return wait_for_state(expected, timeout=8.0)
+
+
 def perform_quick(action: str) -> str:
-    before = stopwatch_state()
     if action in {"pause", "resume"}:
-        click_primary_action_button()
-        return f"{action}: requested from {before or 'unknown'}"
+        # Pause/resume must be verified just like End. A fire-and-forget AX
+        # click can time out while walking TickTick's large calendar tree and
+        # leave the watch showing a state that the Mac never entered.
+        return perform_and_wait(action)
 
     if action == "end":
-        click_secondary_action_button()
-        return f"{action}: requested from {before or 'unknown'}"
+        # Ending is a two-stage transition while running. Always verify it,
+        # even for legacy configs that do not yet pass --wait.
+        return perform_and_wait(action)
 
     raise TickTickUIError(f"Unsupported action: {action}")
 
@@ -329,8 +452,16 @@ def perform_and_wait(action: str) -> str:
     before = stopwatch_state()
 
     if action in {"pause", "resume"}:
-        click_primary_action_button()
-        state = wait_for_state(expected, timeout=8.0)
+        # Pause/resume share one toggle button. Never issue a blind fallback
+        # click when the preference file is slow to publish its new state: a
+        # second click would undo the first transition. Wait longer and fail
+        # closed; the controller will preserve its previous state on failure.
+        state = click_action_and_wait(
+            "primary",
+            expected,
+            accessibility_fallback=False,
+            verify_timeout=15.0,
+        )
         if state in expected:
             return f"{action}: {before or 'unknown'} -> {state or 'unknown'}"
         raise TickTickUIError(
@@ -339,19 +470,40 @@ def perform_and_wait(action: str) -> str:
 
     if action == "end":
         if before == "running":
-            click_primary_action_button()
-            paused = wait_for_state({"paused"}, timeout=8.0)
+            paused = click_action_and_wait("primary", {"paused"})
             if paused != "paused":
                 raise TickTickUIError(
                     f"end could not pause before ending. before={before!r}, after={paused!r}"
                 )
 
+        # A long stopwatch session opens a separate duration-confirmation
+        # sheet after End. Give that branch a chance before falling back to the
+        # expensive full accessibility-tree locator.
+        state = click_action_and_wait(
+            "secondary", expected, accessibility_fallback=False
+        )
+        if state in expected:
+            return f"{action}: {before or 'unknown'} -> {state or 'unknown'}"
+
+        clicked = click_compact_confirmation_button()
+        if not clicked:
+            clicked = click_confirmation_buttons()
+        state = wait_for_state(expected, timeout=8.0)
+        if state in expected:
+            suffix = f", confirmed {clicked}" if clicked else ""
+            return f"{action}: {before or 'unknown'} -> {state or 'unknown'}{suffix}"
+
+        # The window-relative point may not apply to a custom TickTick layout.
+        # Use the older AX locator once, after ruling out the known long-focus
+        # confirmation sheet, rather than repeatedly walking a large calendar.
         click_secondary_action_button()
         state = wait_for_state(expected, timeout=8.0)
         if state in expected:
             return f"{action}: {before or 'unknown'} -> {state or 'unknown'}"
 
-        clicked = click_confirmation_buttons()
+        clicked = click_compact_confirmation_button()
+        if not clicked:
+            clicked = click_confirmation_buttons()
         state = wait_for_state(expected, timeout=8.0)
         if state in expected:
             suffix = f", confirmed {clicked}" if clicked else ""

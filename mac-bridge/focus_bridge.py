@@ -13,6 +13,7 @@ import argparse
 import copy
 import json
 import os
+import plistlib
 import shlex
 import subprocess
 import threading
@@ -131,6 +132,9 @@ class CommandResult:
 
 
 class TickTickAdapter:
+    def stopwatch_snapshot(self) -> dict[str, Any] | None:
+        return None
+
     def start(self, session: dict[str, Any]) -> CommandResult:
         raise NotImplementedError
 
@@ -166,6 +170,53 @@ class ConfigurableTickTickAdapter(TickTickAdapter):
         self.pomo = config.get("pomo", {})
         self.dry_run = bool(config.get("dry_run", True))
         self.timeout = int(self.ticktick.get("command_timeout_seconds", 20))
+
+    def stopwatch_snapshot(self) -> dict[str, Any] | None:
+        """Read TickTick's authoritative stopwatch state and active duration."""
+        configured_path = self.ticktick.get(
+            "preferences_path", "~/Library/Preferences/com.TickTick.task.mac.plist"
+        )
+        path = Path(os.path.expanduser(str(configured_path)))
+        try:
+            data = plistlib.loads(path.read_bytes())
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            return None
+
+        state = data.get("focus__stopwatch_state")
+        if state not in {STATE_RUNNING, STATE_PAUSED, STATE_IDLE}:
+            return None
+        timeline = data.get("focus__stopwatch_timeline")
+        if not isinstance(timeline, list):
+            return {"state": state, "elapsed_seconds": None}
+
+        timed_entries = [
+            entry
+            for entry in timeline
+            if isinstance(entry, dict)
+            and entry.get("state") in {STATE_RUNNING, STATE_PAUSED}
+            and isinstance(entry.get("startDate"), datetime)
+        ]
+        now = utc_now()
+        elapsed = 0.0
+        for index, entry in enumerate(timed_entries):
+            if entry.get("state") != STATE_RUNNING:
+                continue
+            start = entry["startDate"]
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            start_ts = start.timestamp()
+            end = entry.get("endDate")
+            is_live_segment = state == STATE_RUNNING and index == len(timed_entries) - 1
+            if is_live_segment:
+                end_ts = now
+            elif isinstance(end, datetime):
+                if end.tzinfo is None:
+                    end = end.replace(tzinfo=timezone.utc)
+                end_ts = end.timestamp()
+            else:
+                end_ts = start_ts
+            elapsed += max(0.0, end_ts - start_ts)
+        return {"state": state, "elapsed_seconds": int(elapsed)}
 
     def start(self, session: dict[str, Any]) -> CommandResult:
         command = self.ticktick.get("start_command", "")
@@ -343,6 +394,7 @@ class FocusController:
 
     def click(self) -> dict[str, Any]:
         with self.lock:
+            self._reconcile_current_from_ticktick()
             current = self.store.get("current")
             if not current or current.get("state") == STATE_IDLE:
                 return self._start()
@@ -354,6 +406,7 @@ class FocusController:
 
     def double_click(self) -> dict[str, Any]:
         with self.lock:
+            self._reconcile_current_from_ticktick()
             current = self.store.get("current")
             if not current or current.get("state") == STATE_IDLE:
                 return self.snapshot("ignored: no active session")
@@ -528,7 +581,24 @@ class FocusController:
             self._save_store()
             return self.snapshot("note saved")
 
-    def snapshot(self, message: str = "ok") -> dict[str, Any]:
+    def snapshot(
+        self, message: str = "ok", *, include_history_error: bool = False
+    ) -> dict[str, Any]:
+        with self.lock:
+            authoritative = self._reconcile_current_from_ticktick()
+            return self._snapshot_unlocked(
+                message,
+                include_history_error=include_history_error,
+                authoritative=authoritative,
+            )
+
+    def _snapshot_unlocked(
+        self,
+        message: str = "ok",
+        *,
+        include_history_error: bool = False,
+        authoritative: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         current = self.store.get("current")
         history = self.store.get("history", [])
         session = current or (history[-1] if history else None)
@@ -549,22 +619,80 @@ class FocusController:
             "history_count": len(history),
         }
         if session:
+            authoritative_state = (
+                authoritative.get("state") if authoritative is not None else None
+            )
+            authoritative_elapsed = (
+                authoritative.get("elapsed_seconds")
+                if authoritative is not None
+                else None
+            )
             payload.update(
                 {
-                    "state": session.get("state", STATE_IDLE),
+                    "state": (
+                        authoritative_state
+                        if authoritative_state in {STATE_RUNNING, STATE_PAUSED}
+                        else session.get("state", STATE_IDLE)
+                    ),
                     "session_id": session.get("id"),
                     "started_at": iso_from_timestamp(session.get("started_at")),
                     "ended_at": iso_from_timestamp(session.get("ended_at")),
-                    "elapsed_seconds": int(elapsed_seconds(session, now)),
+                    "elapsed_seconds": (
+                        int(authoritative_elapsed)
+                        if isinstance(authoritative_elapsed, (int, float))
+                        else int(elapsed_seconds(session, now))
+                    ),
                     "paused_total_seconds": int(
                         float(session.get("paused_total_seconds") or 0.0)
                     ),
                     "note": session.get("note") or "",
                     "last_action": session.get("last_action") or "",
-                    "last_error": session.get("last_error") or "",
+                    # Historical failures remain in the local ledger, but an
+                    # idle GET must not rebroadcast one as a current device
+                    # error forever. The mutating response that just completed
+                    # a local-fallback session can still opt in for diagnostics.
+                    "last_error": (
+                        session.get("last_error") or ""
+                        if current is not None or include_history_error
+                        else ""
+                    ),
                 }
             )
         return payload
+
+    def _reconcile_current_from_ticktick(self) -> dict[str, Any] | None:
+        """Align the local stopwatch clock to TickTick's persisted timeline."""
+        session = self.store.get("current")
+        if not session or session.get("mode") != "ticktick":
+            return None
+        if session.get("state") == STATE_ENDING:
+            return None
+        authoritative = self.adapter.stopwatch_snapshot()
+        if authoritative is None:
+            return None
+        actual_state = authoritative.get("state")
+        actual_elapsed = authoritative.get("elapsed_seconds")
+        if actual_state not in {STATE_RUNNING, STATE_PAUSED}:
+            return authoritative
+
+        now = utc_now()
+        changed = session.get("state") != actual_state
+        if isinstance(actual_elapsed, (int, float)) and session.get("started_at"):
+            local_elapsed = elapsed_seconds(session, now)
+            if abs(local_elapsed - float(actual_elapsed)) > 2.0:
+                changed = True
+            session["paused_total_seconds"] = max(
+                0.0,
+                now - float(session["started_at"]) - float(actual_elapsed),
+            )
+        session["state"] = actual_state
+        session["paused_started_at"] = now if actual_state == STATE_PAUSED else None
+        if changed:
+            session["updated_at"] = now
+            session["last_action"] = "reconciled from TickTick timeline"
+            session["last_error"] = ""
+            self._save_store()
+        return authoritative
 
     def _start(self) -> dict[str, Any]:
         session = self._new_session()
@@ -599,6 +727,15 @@ class FocusController:
             session["last_action"] = result.message
             session["last_error"] = ""
         except BridgeError as exc:
+            if session.get("mode") != "local_fallback":
+                # TickTick is still running when its UI pause command fails.
+                # Preserve the authoritative state instead of reporting a
+                # successful local pause that never happened on the Mac.
+                session["updated_at"] = utc_now()
+                session["last_error"] = str(exc)
+                session["last_action"] = "pause failed; TickTick session preserved"
+                self._save_store()
+                raise
             session["last_error"] = str(exc)
             session["last_action"] = "local timer paused"
         session["state"] = STATE_PAUSED
@@ -614,6 +751,14 @@ class FocusController:
             session["last_action"] = result.message
             session["last_error"] = ""
         except BridgeError as exc:
+            if session.get("mode") != "local_fallback":
+                # TickTick remains paused on a failed resume. Do not advance
+                # the watch-side clock or discard the paused interval.
+                session["updated_at"] = utc_now()
+                session["last_error"] = str(exc)
+                session["last_action"] = "resume failed; TickTick session preserved"
+                self._save_store()
+                raise
             session["last_error"] = str(exc)
             session["last_action"] = "local timer resumed"
         # Keep the whole UI-command interval paused. Otherwise the local clock
@@ -633,21 +778,36 @@ class FocusController:
 
     def _end(self, session: dict[str, Any]) -> dict[str, Any]:
         now = utc_now()
+        previous_state = session.get("state", STATE_RUNNING)
+        previous_ended_at = session.get("ended_at")
         session["state"] = STATE_ENDING
-        self._save_store()
-        if session.get("paused_started_at"):
-            paused_total = float(session.get("paused_total_seconds") or 0.0)
-            session["paused_total_seconds"] = paused_total + max(
-                0.0, now - float(session["paused_started_at"])
-            )
         session["ended_at"] = now
+        self._save_store()
         try:
             result = self.adapter.end(session)
             session["last_action"] = result.message
             session["last_error"] = ""
         except BridgeError as exc:
+            if session.get("mode") != "local_fallback":
+                # A real TickTick session is still active when its UI command
+                # fails. Keep it current and surface the error instead of
+                # manufacturing a completed local history entry that makes the
+                # watch disagree with the Mac.
+                session["state"] = previous_state
+                session["ended_at"] = previous_ended_at
+                session["updated_at"] = utc_now()
+                session["last_error"] = str(exc)
+                session["last_action"] = "end failed; TickTick session preserved"
+                self._save_store()
+                raise
             session["last_error"] = str(exc)
             session["last_action"] = "local timer ended"
+
+        if session.get("paused_started_at"):
+            paused_total = float(session.get("paused_total_seconds") or 0.0)
+            session["paused_total_seconds"] = paused_total + max(
+                0.0, now - float(session["paused_started_at"])
+            )
 
         try:
             record_result = self.adapter.record(session)
@@ -662,7 +822,7 @@ class FocusController:
         self.store["history"].append(copy.deepcopy(session))
         self.store["current"] = None
         self._save_store()
-        return self.snapshot("ended")
+        return self.snapshot("ended", include_history_error=True)
 
     def _pomo_pause(self, session: dict[str, Any]) -> dict[str, Any]:
         now = utc_now()

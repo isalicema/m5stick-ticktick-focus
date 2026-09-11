@@ -16,13 +16,18 @@ from focus_bridge import (
     deep_merge,
 )
 import focus_bridge
+import ticktick_focus_ui
 
 
 class FakeAdapter:
-    def __init__(self, fail_actions=None, messages=None):
+    def __init__(self, fail_actions=None, messages=None, stopwatch_snapshot=None):
         self.actions = []
         self.fail_actions = set(fail_actions or [])
         self.messages = messages or {}
+        self._stopwatch_snapshot = stopwatch_snapshot
+
+    def stopwatch_snapshot(self):
+        return self._stopwatch_snapshot
 
     def _action(self, action, session):
         self.actions.append(action)
@@ -126,6 +131,78 @@ class FocusControllerTests(unittest.TestCase):
         self.assertEqual(resumed["state"], "running")
         self.assertEqual(ended["state"], "idle")
         self.assertIn("record failed", ended["last_error"])
+        self.assertEqual(controller.snapshot()["last_error"], "")
+        self.assertIn("record failed", controller.store["history"][-1]["last_error"])
+
+    def test_ticktick_end_failure_preserves_active_session(self):
+        adapter = FakeAdapter(fail_actions={"end"})
+        controller = self.make_controller(adapter)
+
+        started = controller.click()
+        session_id = started["session_id"]
+
+        with self.assertRaisesRegex(BridgeError, "end failed"):
+            controller.double_click()
+
+        current = controller.store["current"]
+        self.assertIsNotNone(current)
+        self.assertEqual(current["id"], session_id)
+        self.assertEqual(current["state"], "running")
+        self.assertIsNone(current["ended_at"])
+        self.assertEqual(controller.store["history"], [])
+        self.assertIn("TickTick session preserved", current["last_action"])
+        self.assertIn("end failed", current["last_error"])
+
+    def test_ticktick_pause_failure_preserves_running_session(self):
+        adapter = FakeAdapter(fail_actions={"pause"})
+        controller = self.make_controller(adapter)
+
+        started = controller.click()
+        session_id = started["session_id"]
+
+        with self.assertRaisesRegex(BridgeError, "pause failed"):
+            controller.click()
+
+        current = controller.store["current"]
+        self.assertEqual(current["id"], session_id)
+        self.assertEqual(current["state"], "running")
+        self.assertIsNone(current["paused_started_at"])
+        self.assertIn("pause failed", current["last_error"])
+        self.assertIn("TickTick session preserved", current["last_action"])
+
+    def test_ticktick_resume_failure_preserves_paused_session(self):
+        adapter = FakeAdapter(fail_actions={"resume"})
+        controller = self.make_controller(adapter)
+
+        controller.click()
+        paused = controller.click()
+        paused_started_at = controller.store["current"]["paused_started_at"]
+        self.assertEqual(paused["state"], "paused")
+
+        with self.assertRaisesRegex(BridgeError, "resume failed"):
+            controller.click()
+
+        current = controller.store["current"]
+        self.assertEqual(current["state"], "paused")
+        self.assertEqual(current["paused_started_at"], paused_started_at)
+        self.assertIn("resume failed", current["last_error"])
+        self.assertIn("TickTick session preserved", current["last_action"])
+
+    def test_snapshot_uses_ticktick_authoritative_state_and_elapsed(self):
+        adapter = FakeAdapter(
+            stopwatch_snapshot={"state": "running", "elapsed_seconds": 1420}
+        )
+        controller = self.make_controller(adapter)
+
+        controller.click()
+        controller.store["current"]["state"] = "paused"
+        controller.store["current"]["paused_started_at"] = 100.0
+        snapshot = controller.snapshot()
+
+        self.assertEqual(snapshot["state"], "running")
+        self.assertEqual(snapshot["elapsed_seconds"], 1420)
+        self.assertEqual(controller.store["current"]["state"], "running")
+        self.assertIsNone(controller.store["current"]["paused_started_at"])
 
     def test_note_attaches_to_latest_session(self):
         adapter = FakeAdapter()
@@ -203,6 +280,28 @@ class FocusControllerTests(unittest.TestCase):
             adapter.actions,
             ["start_countdown", "pause_countdown", "resume_countdown", "end_countdown"],
         )
+
+
+class TickTickUIInteractionTests(unittest.TestCase):
+    def test_toggle_verification_never_blindly_clicks_twice(self):
+        with (
+            mock.patch.object(ticktick_focus_ui, "click_focus_action_fast") as fast_click,
+            mock.patch.object(
+                ticktick_focus_ui, "wait_for_state", return_value="paused"
+            ) as wait_for_state,
+            mock.patch.object(ticktick_focus_ui, "click_focus_action") as fallback_click,
+        ):
+            state = ticktick_focus_ui.click_action_and_wait(
+                "primary",
+                {"running"},
+                accessibility_fallback=False,
+                verify_timeout=15.0,
+            )
+
+        self.assertEqual(state, "paused")
+        fast_click.assert_called_once_with("primary")
+        wait_for_state.assert_called_once_with({"running"}, timeout=15.0)
+        fallback_click.assert_not_called()
 
 
 if __name__ == "__main__":
