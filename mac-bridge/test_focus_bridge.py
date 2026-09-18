@@ -13,7 +13,11 @@ from focus_bridge import (
     CommandResult,
     DEFAULT_CONFIG,
     FocusController,
+    FocusRequestHandler,
+    ShutdownRequested,
     deep_merge,
+    handle_shutdown_signal,
+    lifecycle_log,
 )
 import focus_bridge
 import ticktick_focus_ui
@@ -279,6 +283,54 @@ class FocusControllerTests(unittest.TestCase):
         self.assertEqual(
             adapter.actions,
             ["start_countdown", "pause_countdown", "resume_countdown", "end_countdown"],
+        )
+
+
+class LifecycleLoggingTests(unittest.TestCase):
+    def test_http_request_log_flushes_immediately(self):
+        handler = object.__new__(FocusRequestHandler)
+
+        with (
+            mock.patch.object(
+                FocusRequestHandler,
+                "log_date_time_string",
+                return_value="19/Sep/2026 01:20:00",
+            ),
+            mock.patch("builtins.print") as output,
+        ):
+            handler.log_message("%s", "GET /health")
+
+        output.assert_called_once_with(
+            "[19/Sep/2026 01:20:00] GET /health", flush=True
+        )
+
+    def test_lifecycle_log_is_json_and_flushes_immediately(self):
+        stream = mock.Mock()
+
+        with mock.patch.object(focus_bridge, "utc_now", return_value=100.0):
+            lifecycle_log("bridge_started", stream=stream, port=8787, mode="live")
+
+        payload = "".join(
+            call.args[0]
+            for call in stream.write.call_args_list
+            if call.args and call.args[0].strip()
+        )
+        decoded = focus_bridge.json.loads(payload)
+        self.assertEqual(decoded["event"], "bridge_started")
+        self.assertEqual(decoded["port"], 8787)
+        self.assertEqual(decoded["mode"], "live")
+        stream.flush.assert_called_once()
+
+    def test_shutdown_signal_is_logged_and_becomes_graceful_exit(self):
+        with mock.patch.object(focus_bridge, "lifecycle_log") as log:
+            with self.assertRaises(ShutdownRequested) as raised:
+                handle_shutdown_signal(focus_bridge.signal.SIGTERM, None)
+
+        self.assertEqual(raised.exception.signal_name, "SIGTERM")
+        log.assert_called_once_with(
+            "signal_received",
+            signal="SIGTERM",
+            signum=focus_bridge.signal.SIGTERM,
         )
 
 

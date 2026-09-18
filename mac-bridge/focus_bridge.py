@@ -14,8 +14,10 @@ import copy
 import json
 import os
 import plistlib
+import signal
 import shlex
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -74,6 +76,15 @@ class BridgeError(RuntimeError):
     """Raised for expected bridge failures that should be returned as JSON."""
 
 
+class ShutdownRequested(RuntimeError):
+    """Raised by the main-thread signal handler for a graceful shutdown."""
+
+    def __init__(self, signum: int, signal_name: str):
+        super().__init__(f"shutdown requested by {signal_name} ({signum})")
+        self.signum = signum
+        self.signal_name = signal_name
+
+
 def utc_now() -> float:
     return time.time()
 
@@ -82,6 +93,27 @@ def iso_from_timestamp(value: float | None) -> str | None:
     if value is None:
         return None
     return datetime.fromtimestamp(value, tz=timezone.utc).astimezone().isoformat()
+
+
+def lifecycle_log(event: str, *, stream: Any = None, **details: Any) -> None:
+    """Write one immediately flushed JSON lifecycle record."""
+    record = {
+        "timestamp": iso_from_timestamp(utc_now()),
+        "event": event,
+        "pid": os.getpid(),
+        **details,
+    }
+    print(
+        json.dumps(record, ensure_ascii=False, sort_keys=True),
+        file=stream or sys.stdout,
+        flush=True,
+    )
+
+
+def handle_shutdown_signal(signum: int, _frame: Any) -> None:
+    signal_name = signal.Signals(signum).name
+    lifecycle_log("signal_received", signal=signal_name, signum=signum)
+    raise ShutdownRequested(signum, signal_name)
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -980,7 +1012,7 @@ class FocusRequestHandler(BaseHTTPRequestHandler):
     token: str
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        print(f"[{self.log_date_time_string()}] {fmt % args}")
+        print(f"[{self.log_date_time_string()}] {fmt % args}", flush=True)
 
     def do_GET(self) -> None:
         if not self._authorized():
@@ -1092,18 +1124,50 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     config = load_config(args.config, args)
-    server = build_server(config)
     mode = "dry-run" if config.get("dry_run") else "live"
-    print(
-        f"M5Stick TickTick Focus bridge listening on "
-        f"http://{config['host']}:{config['port']} ({mode})"
+    try:
+        server = build_server(config)
+    except BaseException as exc:
+        lifecycle_log(
+            "bridge_start_failed",
+            stream=sys.stderr,
+            exception=type(exc).__name__,
+            message=str(exc),
+            host=config["host"],
+            port=int(config["port"]),
+            mode=mode,
+        )
+        raise
+
+    for shutdown_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(shutdown_signal, handle_shutdown_signal)
+
+    lifecycle_log(
+        "bridge_started",
+        host=config["host"],
+        port=int(config["port"]),
+        mode=mode,
     )
+    exit_reason = "serve_forever_returned"
     try:
         server.serve_forever()
+    except ShutdownRequested as exc:
+        exit_reason = f"signal:{exc.signal_name}"
     except KeyboardInterrupt:
-        print("\nStopping bridge.")
+        exit_reason = "keyboard_interrupt"
+        lifecycle_log("signal_received", signal="KeyboardInterrupt", signum=None)
+    except BaseException as exc:
+        exit_reason = f"exception:{type(exc).__name__}"
+        lifecycle_log(
+            "bridge_failed",
+            stream=sys.stderr,
+            exception=type(exc).__name__,
+            message=str(exc),
+        )
+        raise
     finally:
         server.server_close()
+        lifecycle_log("bridge_stopped", reason=exit_reason)
 
 
 if __name__ == "__main__":

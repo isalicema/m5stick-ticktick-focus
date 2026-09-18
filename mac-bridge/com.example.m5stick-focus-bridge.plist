@@ -9,6 +9,7 @@
   <array>
     <string>/usr/bin/env</string>
     <string>python3</string>
+    <string>-u</string>
     <string>mac-bridge/focus_bridge.py</string>
     <string>--config</string>
     <string>mac-bridge/config.local.json</string>
@@ -34,10 +35,10 @@
   <string>Interactive</string>
 
   <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
 
   <key>StandardOutPath</key>
   <string>/tmp/m5stick-focus-bridge.log</string>

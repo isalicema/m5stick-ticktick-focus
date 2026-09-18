@@ -198,6 +198,11 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.m5stick-focu
 launchctl kickstart -k gui/$(id -u)/com.example.m5stick-focus-bridge
 ```
 
+The template uses `KeepAlive=true`, so launchd restarts the bridge even after a
+clean exit, and starts Python with `-u` for unbuffered output. Startup,
+`SIGINT` / `SIGTERM` / `SIGHUP`, failures, and exit reasons are written as JSON
+lines to the stdout/stderr paths configured in the plist.
+
 ## Shortcuts Setup
 
 Create these macOS Shortcuts:
