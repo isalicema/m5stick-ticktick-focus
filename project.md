@@ -9,11 +9,13 @@
   identifiers, local paths, logs, or unrelated reliability changes.
 - **Baseline:** local `main` and `origin/main` both resolve to
   `09c616ca7742ead792f249115be73846483af139` at the start of this work.
-- **Latest local candidate:** one local commit atop the recorded public baseline;
-  use `git log -1` for its immutable ID.
-- **Delivery state:** implementation, independent local validation, and the
-  approved local-only commit are complete. No push, tag, release, or deployment
-  was performed or authorized.
+- **Published code:** `a2c4097284bf4a9d6b30011e984c9d54bf781eaa` on public
+  `main`; subsequent documentation commits do not change the code candidate.
+- **Delivery state:** implementation and validation are complete. Alice authorized
+  publishing the existing candidate on 2026-10-15; commit `a2c4097` is now
+  pushed to public `main` with remote SHA readback. No tag, release, or
+  deployment was performed. Alice also authorized committing and pushing this
+  publication log; use Git history and remote main to verify its delivery.
 - **Evidence entry points:** `README.md`, `mac-bridge/`,
   `mac-bridge/test_focus_bridge.py`, and this log.
 
@@ -53,3 +55,37 @@ tests, documentation, and project log.
 - **Delivery matrix:** audit, implementation, focused tests, compilation, plist
   lint, diff check, sensitive-data scan, and local commit complete; no push,
   release, deployment, device observation, or Alice acceptance.
+
+
+### P-002 — 2026-10-15 Asia/Shanghai (UTC+8) — publish existing candidate
+
+- **Alice asked:** inspect the September 19 five-file residency/lifecycle commit
+  and push it directly following the prior privacy review.
+- **Actual action:** reviewed the exact diff and clean worktree; fetched origin,
+  confirmed main was ahead by exactly one commit, verified native Git push
+  permission, and pushed the existing commit without changing its contents.
+- **Why:** the candidate matched the authorized public scope; no private paths,
+  credentials, or concrete IP addresses were found in the added content.
+- **Verification:** 15 tests passed; Python compilation, plist lint, and commit
+  whitespace checks passed. Remote main independently read back as
+  `a2c4097284bf4a9d6b30011e984c9d54bf781eaa`.
+- **Delivery matrix:** original commit and push complete; this log update remains
+  local and uncommitted. No release, installation, service reload, device
+  observation, or runtime acceptance performed. Actual launchd restart, signal
+  delivery, and Focus-session continuity remain unverified.
+
+
+### P-003 — 2026-10-15 Asia/Shanghai (UTC+8) — publication log delivery
+
+- **Alice asked:** commit and push the `project.md` publication log update.
+- **Actual change:** reviewed the documentation-only diff, updated the current
+  status to name the published code commit, and retained P-002 as the historical
+  record of when the log was still local and uncommitted.
+- **Why:** publish the delivery evidence alongside the code without modifying
+  the implementation or rewriting the original commit.
+- **Verification:** working tree contained only `project.md`; whitespace checks
+  passed, origin was fetched, and the native Git permission probe succeeded.
+- **Delivery evidence:** this documentation commit contains only `project.md`
+  and is authorized for push to main. Its commit ID and final remote delivery
+  are verifiable through Git history and remote main. No runtime or device
+  checks were added in this documentation round.
