@@ -11,3 +11,6 @@ config.local.json
 state.json
 mac-bridge/send_typeless_key
 mac-bridge/TypelessKeySender.app/Contents/MacOS/TypelessKeySender
+
+# Local project ledger; never commit or publish.
+[Pp][Rr][Oo][Jj][Ee][Cc][Tt].[Mm][Dd]
